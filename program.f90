@@ -1,22 +1,25 @@
+! This module contains helper functions and parameters for the benchmark.
 module bench_helper
 
+  ! Use the ISO_Fortran_env module to access real64 type.
   use, intrinsic :: iso_fortran_env, only: real64
   implicit none
 
   integer, private :: inttmp
   private real64
 
+  ! Seed of the pseudo-random number generator
   integer, parameter :: RNDSEED = 100
-  real(real64), parameter :: DISTSCALE = 15.0
 
-! integer, parameter :: nsh = 50
-! integer, parameter :: nfock = 10
-  integer, parameter :: mxang = 5
+  ! Change these parameters:
+  integer :: nsh   ! input(1)  Number of shells
+  integer :: nfock ! input(2)  Numben of matrices
+  integer, parameter :: mxang = 5 ! Max. angular momentum + 1, i.e. 1=s, 2=p, 3=d,..
   integer, parameter :: shsize(5) = [(inttmp*(inttmp+1)/2, inttmp = 1, 5)]
 
 contains
 
-
+  ! Initialize the random number generator with a given seed.
   subroutine init_rng(iseed)
     integer :: iseed
 
@@ -30,7 +33,7 @@ contains
 
   end subroutine
 
-
+  ! Initialize shell types and pointers to the first basis function for each shell.
   subroutine init_shells(typsh, ptrbf, nsh)
     integer :: typsh(:), ptrbf(:)
 
@@ -51,25 +54,14 @@ contains
 
   end subroutine
 
-
+  ! Initialize the density matrix with random numbers.
   subroutine init_d(d)
     real(real64) :: d(:,:,:)
     call random_number(d)
   end subroutine
 
-
-  subroutine gen_g(g, typsh, scal, i, j, k, l)
-    real(real64) :: g(*), scal
-    integer :: typsh(:)
-    integer :: i, j, k, l
-    integer :: n(4), ntot
-    n = shsize(typsh([i,j,k,l]))
-    ntot = product(n)
-    call random_number(g(1:ntot))
-    g(1:ntot) = g(1:ntot) * scal
-  end subroutine
-
-
+  ! Update Fock matrix with integrals for a given quartet of shells.
+  ! Fock-Integrals contraction algorithm (FI). Follow for order of cycles.
   subroutine upd_fi(f, d, g, typsh, ptrbf, shi, shj, shk, shl)
     real(real64) :: f(:,:,:), d(:,:,:)
     real(real64), target :: g(:)
@@ -92,7 +84,7 @@ contains
     nk = shsize(typsh(shk))
     nl = shsize(typsh(shl))
 
-    pg(1:nl,1:nk,1:nj,1:ni) =>g(1:)
+    pg(1:nl,1:nk,1:nj,1:ni) => g(1:)
 
     do n = 1, ubound(f,3)
     do i = 1, ni
@@ -121,7 +113,8 @@ contains
 
   end subroutine
 
-
+  ! Update Fock matrix with integrals for a given quartet of shells.
+  ! Original Integrals-Fock contraction algorithm (IF). Follow for order of cycles.
   subroutine upd_if(f, d, g, typsh, ptrbf, shi, shj, shk, shl)
     real(real64) :: f(:,:,:), d(:,:,:)
     real(real64), target :: g(:)
@@ -144,7 +137,7 @@ contains
     nk = shsize(typsh(shk))
     nl = shsize(typsh(shl))
 
-    pg(1:nl,1:nk,1:nj,1:ni) =>g(1:)
+    pg(1:nl,1:nk,1:nj,1:ni) => g(1:)
 
     !do n = 1, ubound(f,3)
     do i = 1, ni
@@ -173,10 +166,13 @@ contains
 
   end subroutine
 
-
 end module
 
 
+  !The bench program reads two integer command-line arguments:
+  ! the number of shells and the number of matrices (nfock).
+  ! It then allocates arrays for the density matrix (d) and the Fock matrix (f).
+  ! Finally, it performs benchmarks for the FI and IF algorithms
 program bench
 
   use, intrinsic :: iso_fortran_env, only: real64, int64
@@ -184,20 +180,19 @@ program bench
 
   implicit none
 
-  real(real64) :: g(shsize(mxang)**4)
-  real(real64), allocatable :: f(:,:,:)
-  real(real64), allocatable :: d(:,:,:)
-  integer, allocatable :: typsh(:)
-  integer, allocatable :: ptrbf(:)
+  real(real64) :: g(shsize(mxang)**4)   ! Block of ERIs corresponding to four shells
+  real(real64), allocatable :: f(:,:,:) ! Fock-like matrices
+  real(real64), allocatable :: d(:,:,:) ! Density-like matrices
+  integer, allocatable :: typsh(:)      ! shell types 1 = s, 2 = p, etc.
+  integer, allocatable :: ptrbf(:)      ! indices of the first BF in a shell
   integer :: i, j, k, l, lmax, nbf, nbf2
   real(real64) :: scal
   character(1), parameter :: cret = achar(13)
 
   integer(int64) :: t0, t1, rate
 
-  integer :: ierr, nsh, nfock
+  integer :: ierr
   character(20) :: arg1, arg2
-! integer :: arg1, arg2
 
   ! Read the first command-line argument as an integer
   call get_command_argument(1, arg1)
@@ -234,9 +229,11 @@ program bench
   write(*,'(/,2X,A)') "Benchmark options:"
   write(*,'(A50," = ",i8)') "Number of shells", nsh
   write(*,'(A50," = ",i8)') "Max. angular momentum", mxang
+  write(*,'(A50," = ",i8)') "Number of matrices (nfock)", nfock
   write(*,'(A50," = ",i8)') "Random seed", RNDSEED
   write(*,'(A50," = ",i8)') "Number of basis functions (randomly generated)", nbf
 
+  ! The system_clock function is used to measure the elapsed time for each benchmark.
   call system_clock(t0, rate)
 
   do i = 1, nsh
@@ -247,7 +244,6 @@ program bench
         if (k==i) lmax = j
         do l = 1, lmax
             scal = 1.0d0
-            !call gen_g(g, typsh, scal, i, j, k, l)
             call upd_fi(f, d, g, typsh, ptrbf, i, j, k, l)
         end do
       end do
@@ -267,7 +263,6 @@ program bench
         if (k==i) lmax = j
         do l = 1, lmax
             scal = 1.0d0
-            !call gen_g(g, typsh, scal, i, j, k, l)
             call upd_if(f, d, g, typsh, ptrbf, i, j, k, l)
         end do
       end do
